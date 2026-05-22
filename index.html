@@ -3,20 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FTC DECODE Simulator (Onshape Engine)</title>
+    <title>FTC DECODE Simulator (Keyboard + Onshape Engine)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; user-select: none; }
         #canvas-container { width: 100vw; height: 100vh; }
         #hud { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.85); color: #fff; padding: 15px; border-radius: 8px; border: 2px solid #333; width: 280px; }
         #hud h3 { margin: 0 0 10px 0; text-align: center; color: #ffaa00; }
         .control-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
-        .key { background: #444; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+        .key { background: #444; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-family: monospace; }
         #bot-status { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.85); color: #fff; padding: 15px; border-radius: 8px; border: 2px solid #333; display: flex; align-items: center; gap: 15px; }
         #status-light { width: 30px; height: 30px; border-radius: 50%; background-color: #fff; box-shadow: 0 0 15px #fff; transition: all 0.1s ease; }
         #status-text { font-size: 14px; font-weight: bold; text-transform: uppercase; }
         #telemetry { font-family: monospace; font-size: 12px; color: #aaa; margin-top: 10px; line-height: 1.4; }
         #loading-screen { position: absolute; top:0; left:0; width:100vw; height:100vh; background:#111; color:white; display:flex; flex-direction:column; justify-content:center; align-items:center; font-weight:bold; font-size:24px; z-index:999; text-align: center; }
-        #controller-warn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(200, 0, 0, 0.9); color: white; padding: 20px; text-align: center; border-radius: 10px; font-weight: bold; display: block; z-index: 500; }
+        #controller-warn { position: absolute; bottom: 20px; right: 20px; background: rgba(0, 100, 220, 0.9); color: white; padding: 12px 20px; text-align: center; border-radius: 8px; font-weight: bold; display: block; z-index: 500; font-size: 13px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -25,24 +25,23 @@
 <body>
 
     <div id="loading-screen">
-        UNZIPPING & PARSING ONSHAPE CAD MESHES...
-        <span id="load-subtext" style="font-size:14px; color:#888; margin-top:10px;">Reading embedded base64 geometry buffers...</span>
+        UNZIPPING & FLIPPING CAD FIELD MESHES...
+        <span id="load-subtext" style="font-size:14px; color:#888; margin-top:10px;">Inverting Onshape orientation matrices...</span>
     </div>
 
     <div id="canvas-container"></div>
 
     <div id="controller-warn">
-        LOGITECH F310 NOT DETECTED<br>
-        <span style="font-weight:normal; font-size:12px;">Switch on 'X', Mode LED OFF, press any button to map.</span>
+        KEYBOARD CONTROLS ACTIVE<br>
+        <span style="font-weight:normal; font-size:11px; color:#ddd;">Plug in an F310 controller anytime to auto-swap.</span>
     </div>
 
     <div id="hud">
-        <h3>Driver Controls</h3>
-        <div class="control-row"><span>Drive / Strafe</span><span class="key">Left Stick</span></div>
-        <div class="control-row"><span>Rotate Robot</span><span class="key">Right Stick X</span></div>
-        <div class="control-row"><span>Intake Toggle</span><span class="key">Right Bumper (RB)</span></div>
-        <div class="control-row"><span>Shoot Ball</span><span class="key">Right Trigger (RT)</span></div>
-        <div class="control-row"><span>Turtle Slow Mode</span><span class="key">Left Trigger (LT)</span></div>
+        <h3>Simulation Controls</h3>
+        <div class="control-row"><span>Drive / Strafe</span><span class="key">W, A, S, D</span></div>
+        <div class="control-row"><span>Rotate Robot</span><span class="key">Q / E</span></div>
+        <div class="control-row"><span>Intake Toggle</span><span class="key">Enter</span></div>
+        <div class="control-row"><span>Shoot Ball</span><span class="key">\ (Backslash)</span></div>
         <hr style="border: 0; border-top: 1px solid #444; margin: 10px 0;">
         <div id="telemetry">Assets Streaming...</div>
     </div>
@@ -56,9 +55,9 @@
     </div>
 
     <script>
-        const FIELD_SIZE = 3.6576; // 12 feet field parameters
-        const ROBOT_SIZE = 0.4572; // 18 inches
-        const BALL_RADIUS = 0.0635; // Game elements
+        const FIELD_SIZE = 3.6576; 
+        const ROBOT_SIZE = 0.4572; 
+        const BALL_RADIUS = 0.0635; 
         const HIGH_GOAL_POS = new THREE.Vector3(0, 0.9, -FIELD_SIZE/2 + 0.1); 
 
         const scene = new THREE.Scene();
@@ -85,6 +84,35 @@
         const flyingParticles = [];
         let loadedCount = 0;
 
+        // --- KEYBOARD ENGINE STATES ---
+        const keys = { w: false, a: false, s: false, d: false, q: false, e: false, enter: false, backslash: false };
+        let kIntakePressedPrev = false;
+        let kShootPressedPrev = false;
+
+        window.addEventListener('keydown', (e) => {
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = true;
+            if (k === 'a') keys.a = true;
+            if (k === 's') keys.s = true;
+            if (k === 'd') keys.d = true;
+            if (k === 'q') keys.q = true;
+            if (k === 'e') keys.e = true;
+            if (e.key === 'Enter') keys.enter = true;
+            if (e.key === '\\') keys.backslash = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const k = e.key.toLowerCase();
+            if (k === 'w') keys.w = false;
+            if (k === 'a') keys.a = false;
+            if (k === 's') keys.s = false;
+            if (k === 'd') keys.d = false;
+            if (k === 'q') keys.q = false;
+            if (k === 'e') keys.e = false;
+            if (e.key === 'Enter') keys.enter = false;
+            if (e.key === '\\') keys.backslash = false;
+        });
+
         function checkLoadingStatus() {
             loadedCount++;
             if(loadedCount >= 3) {
@@ -93,7 +121,7 @@
             }
         }
 
-        // --- 1. ZIP UNPACKER FOR EMBEDDED GLTF ---
+        // --- ZIP UNPACKER & INVERSION SYSTEM ---
         fetch(encodeURIComponent('DECODE Full Field.zip'))
             .then(response => {
                 if (!response.ok) throw new Error("Field Zip package not found.");
@@ -104,24 +132,26 @@
                 const gltfFile = Object.keys(zip.files).find(name => name.endsWith('.gltf'));
                 if (!gltfFile) throw new Error("Could not find .gltf file inside zip archive.");
                 
-                document.getElementById('load-subtext').innerText = "Decompressing embedded meshes...";
                 const gltfText = await zip.file(gltfFile).async("string");
                 const gltfJson = JSON.parse(gltfText);
 
                 gltfLoader.parse(JSON.stringify(gltfJson), '', function(gltf) {
                     const fieldMesh = gltf.scene;
+                    
+                    // --- FLIP FIELD RIGHT-SIDE UP ---
+                    fieldMesh.rotation.x = Math.PI; 
+                    
                     scene.add(fieldMesh);
                     checkLoadingStatus();
                 }, function(err) { throw err; });
             })
             .catch(error => {
                 console.error("ZIP pipeline error:", error);
-                document.getElementById('load-subtext').innerText = "Asset linking bypassed. Building fallbacks...";
                 createFallbackFloor();
                 checkLoadingStatus();
             });
 
-        // --- 2. LOOSE EMBEDDED ASSET LOADERS ---
+        // --- LOOSE EMBEDDED ASSET LOADERS ---
         gltfLoader.load(encodeURIComponent('Purple Artifact.gltf'), function(gltf) {
             ballTemplatePurple = gltf.scene;
             checkLoadingStatus();
@@ -160,7 +190,7 @@
             }
         }
 
-        // --- ROBOT INITIALIZATION GRAPHICS ---
+        // --- ROBOT GRAPHICS ---
         const robotGroup = new THREE.Group();
         const chassis = new THREE.Mesh(new THREE.BoxGeometry(ROBOT_SIZE, 0.15, ROBOT_SIZE), new THREE.MeshStandardMaterial({ color: 0x2a2a2a }));
         chassis.position.y = 0.075;
@@ -180,7 +210,7 @@
         scene.add(robotGroup);
         robotGroup.position.set(0, 0, FIELD_SIZE / 4);
 
-        // --- SIMULATION MACHINE STATES ---
+        // --- STATE VALS ---
         const botState = {
             ballsHeld: 0,
             maxCapacity: 3, 
@@ -192,8 +222,14 @@
         };
 
         let gamepadIndex = null;
-        window.addEventListener("gamepadconnected", (e) => { gamepadIndex = e.gamepad.index; document.getElementById('controller-warn').style.display = 'none'; });
-        window.addEventListener("gamepaddisconnected", () => { gamepadIndex = null; document.getElementById('controller-warn').style.display = 'block'; });
+        window.addEventListener("gamepadconnected", (e) => { 
+            gamepadIndex = e.gamepad.index; 
+            document.getElementById('controller-warn').innerHTML = "LOGITECH F310 PLUGGED IN<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Gamepad control overrides active.</span>";
+        });
+        window.addEventListener("gamepaddisconnected", () => { 
+            gamepadIndex = null; 
+            document.getElementById('controller-warn').innerHTML = "KEYBOARD CONTROLS ACTIVE<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Plug in an F310 controller anytime to auto-swap.</span>";
+        });
 
         let rbPressedPrev = false;
         let rtPressedPrev = false;
@@ -203,51 +239,70 @@
             requestAnimationFrame(updateSimulation);
             const dt = Math.min(clock.getDelta(), 0.1);
 
+            let strafe = 0;
+            let forward = 0;
+            let rotate = 0;
+            let intakeActionTriggered = false;
+            let shootActionTriggered = false;
+
+            // --- INPUT DECISION TREE (GAMEPAD VS KEYBOARD) ---
             if (gamepadIndex !== null) {
                 const gp = navigator.getGamepads()[gamepadIndex];
                 if (gp) {
                     const deadzone = 0.15;
-                    let strafe = Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0;
-                    let forward = Math.abs(gp.axes[1]) > deadzone ? -gp.axes[1] : 0;
-                    let rotate = Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0;
+                    strafe = Math.abs(gp.axes[0]) > deadzone ? gp.axes[0] : 0;
+                    forward = Math.abs(gp.axes[1]) > deadzone ? -gp.axes[1] : 0;
+                    rotate = Math.abs(gp.axes[2]) > deadzone ? gp.axes[2] : 0;
 
                     const rbToggle = gp.buttons[5].pressed;
-                    const ltModifier = gp.buttons[6].pressed || gp.axes[4] > 0.1;
-                    const rtShoot = gp.buttons[7].pressed || gp.axes[5] > 0.1;
-
-                    let speedLimit = 1.8;
-                    let turnLimit = 4.0;
-                    if (ltModifier) { speedLimit *= 0.35; turnLimit *= 0.30; }
-
-                    let targetVx = strafe * speedLimit;
-                    let targetVz = -forward * speedLimit;
-                    
-                    botState.velocity.set(targetVx, 0, targetVz);
-                    botState.angularVelocity = -rotate * turnLimit;
-
-                    if (rbToggle && !rbPressedPrev) {
-                        if (botState.ballsHeld < botState.maxCapacity) {
-                            botState.intakeActive = !botState.intakeActive;
-                        }
-                    }
+                    if (rbToggle && !rbPressedPrev) intakeActionTriggered = true;
                     rbPressedPrev = rbToggle;
 
-                    if (rtShoot && !rtPressedPrev) {
-                        executeShooterAction();
-                    }
+                    const rtShoot = gp.buttons[7].pressed || gp.axes[5] > 0.1;
+                    if (rtShoot && !rtPressedPrev) shootActionTriggered = true;
                     rtPressedPrev = rtShoot;
                 }
+            } else {
+                // Read Keyboard Emulation
+                if (keys.w) forward += 1.0;
+                if (keys.s) forward -= 1.0;
+                if (keys.a) strafe -= 1.0;
+                if (keys.d) strafe += 1.0;
+                if (keys.q) rotate -= 1.0;
+                if (keys.e) rotate += 1.0;
+
+                if (keys.enter && !kIntakePressedPrev) intakeActionTriggered = true;
+                kIntakePressedPrev = keys.enter;
+
+                if (keys.backslash && !kShootPressedPrev) shootActionTriggered = true;
+                kShootPressedPrev = keys.backslash;
             }
+
+            // --- EXECUTE TRANSLATIONAL MOVEMENT ---
+            let speedLimit = 1.8;
+            let turnLimit = 4.0;
+            botState.velocity.set(strafe * speedLimit, 0, forward * speedLimit);
+            botState.angularVelocity = -rotate * turnLimit;
 
             const localVelocity = botState.velocity.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), botState.heading);
             robotGroup.position.addScaledVector(localVelocity, dt);
             botState.heading += botState.angularVelocity * dt;
             robotGroup.rotation.y = botState.heading;
 
+            // Boundaries
             const edgeBound = (FIELD_SIZE / 2) - (ROBOT_SIZE / 2);
             robotGroup.position.x = Math.max(-edgeBound, Math.min(edgeBound, robotGroup.position.x));
             robotGroup.position.z = Math.max(-edgeBound, Math.min(edgeBound, robotGroup.position.z));
 
+            // Process Actions
+            if (intakeActionTriggered && botState.ballsHeld < botState.maxCapacity) {
+                botState.intakeActive = !botState.intakeActive;
+            }
+            if (shootActionTriggered) {
+                executeShooterAction();
+            }
+
+            // Intake Extraction Logic
             if (botState.intakeActive && botState.ballsHeld < botState.maxCapacity) {
                 const intakePos = new THREE.Vector3(0, 0.05, ROBOT_SIZE / 2).applyAxisAngle(new THREE.Vector3(0, 1, 0), botState.heading).add(robotGroup.position);
 
@@ -266,6 +321,7 @@
                 }
             }
 
+            // Aim Turret
             const dx = HIGH_GOAL_POS.x - robotGroup.position.x;
             const dz = HIGH_GOAL_POS.z - robotGroup.position.z;
             let targetLocalAngle = (Math.atan2(dx, dz) + Math.PI) - botState.heading;
@@ -273,6 +329,7 @@
             botState.turretLocalRotation = THREE.MathUtils.lerp(botState.turretLocalRotation, targetLocalAngle, 14 * dt);
             turretGroup.rotation.y = botState.turretLocalRotation;
 
+            // Ball Flight Projectiles
             for (let i = flyingParticles.length - 1; i >= 0; i--) {
                 const p = flyingParticles[i];
                 p.velocity.y += -9.81 * dt;
@@ -293,6 +350,7 @@
                 }
             }
 
+            // HUD Diagnostics
             document.getElementById('telemetry').innerHTML = `
                 Inventory Data: ${botState.ballsHeld} / 3 Loaded<br>
                 Turret Angle: ${(botState.turretLocalRotation * (180/Math.PI)).toFixed(1)}°<br>
@@ -309,7 +367,7 @@
                 txt.innerText = "INTAKING ACTIVE"; txt.style.color = '#ffaa00';
             } else {
                 light.style.backgroundColor = '#ffffff'; light.style.boxShadow = '0 0 15px #ffffff';
-                txt.innerText = "SYSTEM RE-ENGAGED"; txt.style.color = '#ffffff';
+                txt.innerText = "SYSTEM READY"; txt.style.color = '#ffffff';
             }
 
             renderer.render(scene, camera);
