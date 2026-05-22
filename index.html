@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FTC DECODE Simulator (Normalized Coordinate Engine)</title>
+    <title>FTC DECODE Simulator (Stabilized Graphics Engine)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #111; font-family: sans-serif; user-select: none; }
         #canvas-container { width: 100vw; height: 100vh; }
@@ -25,15 +25,15 @@
 <body>
 
     <div id="loading-screen">
-        PROCESSING ONSHAPE ASSEMBLY GRAPHICS...
-        <span id="load-subtext" style="font-size:14px; color:#888; margin-top:10px;">Computing geometry transformations...</span>
+        LOADING CAD FIELD MESHES...
+        <span id="load-subtext" style="font-size:14px; color:#888; margin-top:10px;">Applying double-sided rendering matrices...</span>
     </div>
 
     <div id="canvas-container"></div>
 
     <div id="controller-warn">
         KEYBOARD CONTROLS ACTIVE<br>
-        <span style="font-weight:normal; font-size:11px; color:#ddd;">Drive with WASD + QE. Plug in F310 anytime to override.</span>
+        <span style="font-weight:normal; font-size:11px; color:#ddd;">Drive: WASD + QE | Plug in F310 anytime to override.</span>
     </div>
 
     <div id="hud">
@@ -49,14 +49,14 @@
     <div id="bot-status">
         <div id="status-light"></div>
         <div>
-            <div id="status-text">SYSTEM BOOTING</div>
+            <div id="status-text">SYSTEM READY</div>
             <div style="font-size:11px; color:#888;">Telemetry Mirror Dashboard</div>
         </div>
     </div>
 
     <script>
-        const FIELD_SIZE = 3.6576; // 12ft x 12ft FTC Perimeter Floor dimensions
-        const ROBOT_SIZE = 0.4572; // Standard 18-inch sizing bounds
+        const FIELD_SIZE = 3.6576; 
+        const ROBOT_SIZE = 0.4572; 
         const BALL_RADIUS = 0.0635; 
         const HIGH_GOAL_POS = new THREE.Vector3(0, 0.9, -FIELD_SIZE / 2 + 0.15); 
 
@@ -64,17 +64,16 @@
         scene.background = new THREE.Color(0x111111);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 3.8, FIELD_SIZE / 2 + 0.8);
-        camera.lookAt(0, 0.2, -0.2);
+        camera.position.set(0, 4.0, FIELD_SIZE / 2 + 1.0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.shadowMap.enabled = true;
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-        sun.position.set(4, 10, 4);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+        const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+        sun.position.set(4, 12, 4);
         scene.add(sun);
 
         const gltfLoader = new THREE.GLTFLoader();
@@ -84,7 +83,7 @@
         const flyingParticles = [];
         let loadedCount = 0;
 
-        // --- KEYBOARD LISTENERS ENGINE ---
+        // --- KEYBOARD CONFIGURATION ---
         const keys = { w: false, a: false, s: false, d: false, q: false, e: false, enter: false, backslash: false };
         let kIntakePressedPrev = false;
         let kShootPressedPrev = false;
@@ -121,16 +120,16 @@
             }
         }
 
-        // --- DECOUPLED FIELD CORRECTION ASSEMBLY ---
+        // --- FIELD ZIP UNPACKING & STABILIZATION ENGINE ---
         fetch(encodeURIComponent('DECODE Full Field.zip'))
             .then(response => {
-                if (!response.ok) throw new Error("Target Field ZIP package missing.");
+                if (!response.ok) throw new Error("ZIP package path invalid.");
                 return response.arrayBuffer();
             })
             .then(arrayBuffer => JSZip.loadAsync(arrayBuffer))
             .then(async (zip) => {
                 const gltfFile = Object.keys(zip.files).find(name => name.endsWith('.gltf'));
-                if (!gltfFile) throw new Error("Missing structural .gltf configuration inside archive container.");
+                if (!gltfFile) throw new Error("No .gltf configuration found inside archive.");
                 
                 const gltfText = await zip.file(gltfFile).async("string");
                 const gltfJson = JSON.parse(gltfText);
@@ -138,37 +137,29 @@
                 gltfLoader.parse(JSON.stringify(gltfJson), '', function(gltf) {
                     const fieldMesh = gltf.scene;
                     
-                    // Instantiate a structural normalization pivot group
-                    const fieldPivot = new THREE.Group();
-                    scene.add(fieldPivot);
+                    // Force Scale Inversion instead of orbital rotation to prevent coordinate drift
+                    fieldMesh.scale.y = -1;
+                    
+                    // Traverse and set DoubleSide rendering to prevent flipped faces from turning invisible
+                    fieldMesh.traverse(child => {
+                        if (child.isMesh) {
+                            if (child.material) {
+                                child.material.side = THREE.DoubleSide;
+                            }
+                        }
+                    });
 
-                    // Compute structural boundary coordinates
-                    const fieldBox = new THREE.Box3().setFromObject(fieldMesh);
-                    const centerPoint = new THREE.Vector3();
-                    fieldBox.getCenter(centerPoint);
-
-                    // Re-center mesh local origins right on the pivot center point
-                    fieldMesh.position.sub(centerPoint);
-                    fieldPivot.add(fieldMesh);
-
-                    // Apply coordinate orientation matrix inversion
-                    fieldPivot.rotation.x = Math.PI; 
-                    fieldPivot.rotation.y = Math.PI; // Keeps the goal lines positioned at the back boundary plane
-
-                    // Flush bottom surface geometry flat on the physics field layout engine
-                    const correctedBox = new THREE.Box3().setFromObject(fieldPivot);
-                    fieldPivot.position.y = -correctedBox.min.y;
-
+                    scene.add(fieldMesh);
                     checkLoadingStatus();
                 }, function(err) { throw err; });
             })
             .catch(error => {
-                console.error("Assembly processing failure:", error);
+                console.error("Asset initialization failed, loading fallback field:", error);
                 createFallbackFloor();
                 checkLoadingStatus();
             });
 
-        // --- ARTIFACT MESH UTILITIES ---
+        // --- GAME ELEMENT LOADERS ---
         gltfLoader.load(encodeURIComponent('Purple Artifact.gltf'), function(gltf) {
             ballTemplatePurple = gltf.scene;
             checkLoadingStatus();
@@ -180,13 +171,13 @@
         }, undefined, function(e) { createFallbackBallTemplate(0x00ff33, false); checkLoadingStatus(); });
 
         function createFallbackFloor() {
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_SIZE, FIELD_SIZE), new THREE.MeshStandardMaterial({color: 0x1a1a1a, roughness: 0.8}));
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(FIELD_SIZE, FIELD_SIZE), new THREE.MeshStandardMaterial({color: 0x222222}));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
         }
 
         function createFallbackBallTemplate(colorHex, isPurple) {
-            const mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 16, 16), new THREE.MeshStandardMaterial({color: colorHex, roughness: 0.4}));
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS, 16, 16), new THREE.MeshStandardMaterial({color: colorHex}));
             if(isPurple) ballTemplatePurple = mesh; else ballTemplateGreen = mesh;
         }
 
@@ -207,13 +198,13 @@
             }
         }
 
-        // --- SIMULATED CHASSIS GRAPHICS ---
+        // --- ROBOT SIMULATOR DESIGN ---
         const robotGroup = new THREE.Group();
-        const chassis = new THREE.Mesh(new THREE.BoxGeometry(ROBOT_SIZE, 0.15, ROBOT_SIZE), new THREE.MeshStandardMaterial({ color: 0x2d2d2d, metalness: 0.5, roughness: 0.2 }));
+        const chassis = new THREE.Mesh(new THREE.BoxGeometry(ROBOT_SIZE, 0.15, ROBOT_SIZE), new THREE.MeshStandardMaterial({ color: 0x2b2b2b }));
         chassis.position.y = 0.075;
         robotGroup.add(chassis);
 
-        const intake = new THREE.Mesh(new THREE.BoxGeometry(ROBOT_SIZE - 0.04, 0.08, 0.05), new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x003322 }));
+        const intake = new THREE.Mesh(new THREE.BoxGeometry(ROBOT_SIZE - 0.04, 0.08, 0.05), new THREE.MeshStandardMaterial({ color: 0x00ffcc }));
         intake.position.set(0, 0.05, ROBOT_SIZE / 2); 
         robotGroup.add(intake);
 
@@ -227,7 +218,7 @@
         scene.add(robotGroup);
         robotGroup.position.set(0, 0, FIELD_SIZE / 4);
 
-        // --- SIMULATION MACHINE STATES ---
+        // --- SYSTEM VALUES ---
         const botState = {
             ballsHeld: 0,
             maxCapacity: 3, 
@@ -241,11 +232,11 @@
         let gamepadIndex = null;
         window.addEventListener("gamepadconnected", (e) => { 
             gamepadIndex = e.gamepad.index; 
-            document.getElementById('controller-warn').innerHTML = "LOGITECH F310 DETECTED<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Hardware inputs mapped successfully.</span>";
+            document.getElementById('controller-warn').innerHTML = "LOGITECH F310 PLUGGED IN<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Gamepad active.</span>";
         });
         window.addEventListener("gamepaddisconnected", () => { 
             gamepadIndex = null; 
-            document.getElementById('controller-warn').innerHTML = "KEYBOARD CONTROLS ACTIVE<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Drive with WASD + QE. Plug in F310 anytime to override.</span>";
+            document.getElementById('controller-warn').innerHTML = "KEYBOARD CONTROLS ACTIVE<br><span style='font-weight:normal; font-size:11px; color:#ddd;'>Drive with WASD + QE.</span>";
         });
 
         let rbPressedPrev = false;
@@ -262,7 +253,7 @@
             let intakeActionTriggered = false;
             let shootActionTriggered = false;
 
-            // Input Selection Hub
+            // Input Selection Engine
             if (gamepadIndex !== null) {
                 const gp = navigator.getGamepads()[gamepadIndex];
                 if (gp) {
@@ -294,9 +285,9 @@
                 kShootPressedPrev = keys.backslash;
             }
 
-            // Kinematics Execution
-            let speedLimit = 1.9;
-            let turnLimit = 4.2;
+            // Kinematic Updates
+            let speedLimit = 1.8;
+            let turnLimit = 4.0;
             botState.velocity.set(strafe * speedLimit, 0, forward * speedLimit);
             botState.angularVelocity = -rotate * turnLimit;
 
@@ -305,12 +296,11 @@
             botState.heading += botState.angularVelocity * dt;
             robotGroup.rotation.y = botState.heading;
 
-            // Arena Boundary Guardrails
+            // Keep inside field walls
             const edgeBound = (FIELD_SIZE / 2) - (ROBOT_SIZE / 2);
             robotGroup.position.x = Math.max(-edgeBound, Math.min(edgeBound, robotGroup.position.x));
             robotGroup.position.z = Math.max(-edgeBound, Math.min(edgeBound, robotGroup.position.z));
 
-            // State Action Executors
             if (intakeActionTriggered && botState.ballsHeld < botState.maxCapacity) {
                 botState.intakeActive = !botState.intakeActive;
             }
@@ -318,7 +308,7 @@
                 executeShooterAction();
             }
 
-            // Collection Mechanics
+            // Intake Hit Detection Loop
             if (botState.intakeActive && botState.ballsHeld < botState.maxCapacity) {
                 const intakePos = new THREE.Vector3(0, 0.05, ROBOT_SIZE / 2).applyAxisAngle(new THREE.Vector3(0, 1, 0), botState.heading).add(robotGroup.position);
 
@@ -337,7 +327,7 @@
                 }
             }
 
-            // High Goal Targeting Matrix
+            // Auto-Tracking Turret targeting Matrix
             const dx = HIGH_GOAL_POS.x - robotGroup.position.x;
             const dz = HIGH_GOAL_POS.z - robotGroup.position.z;
             let targetLocalAngle = (Math.atan2(dx, dz) + Math.PI) - botState.heading;
@@ -345,14 +335,14 @@
             botState.turretLocalRotation = THREE.MathUtils.lerp(botState.turretLocalRotation, targetLocalAngle, 14 * dt);
             turretGroup.rotation.y = botState.turretLocalRotation;
 
-            // Projectile Tracking Pipeline
+            // Projectile Vector Space
             for (let i = flyingParticles.length - 1; i >= 0; i--) {
                 const p = flyingParticles[i];
                 p.velocity.y += -9.81 * dt;
                 p.mesh.position.addScaledVector(p.velocity, dt);
 
-                if (p.mesh.position.y <= HIGH_GOAL_POS.y + 0.25 && p.mesh.position.y >= HIGH_GOAL_POS.y - 0.25) {
-                    if (new THREE.Vector2(p.mesh.position.x, p.mesh.position.z).distanceTo(new THREE.Vector2(HIGH_GOAL_POS.x, HIGH_GOAL_POS.z)) < 0.3) {
+                if (p.mesh.position.y <= HIGH_GOAL_POS.y + 0.2 && p.mesh.position.y >= HIGH_GOAL_POS.y - 0.2) {
+                    if (new THREE.Vector2(p.mesh.position.x, p.mesh.position.z).distanceTo(new THREE.Vector2(HIGH_GOAL_POS.x, HIGH_GOAL_POS.z)) < 0.25) {
                         scene.remove(p.mesh);
                         flyingParticles.splice(i, 1);
                         respawnScoredElement(p.isPurple);
@@ -366,11 +356,15 @@
                 }
             }
 
-            // Real-Time Diagnostic Feed
+            // Dynamic Camera Tracking Lock (Ensures robot & field stay framed perfectly)
+            camera.position.set(robotGroup.position.x, 3.8, robotGroup.position.z + FIELD_SIZE / 2 + 0.8);
+            camera.lookAt(robotGroup.position.x, 0.2, robotGroup.position.z - 0.2);
+
+            // Dashboard HUD Update
             document.getElementById('telemetry').innerHTML = `
                 Inventory Data: ${botState.ballsHeld} / 3 Loaded<br>
-                Turret Local Vector: ${(botState.turretLocalRotation * (180/Math.PI)).toFixed(1)}°<br>
-                Intake System Loop: ${botState.intakeActive ? "RUNNING" : "STOPPED"}
+                Turret Angle: ${(botState.turretLocalRotation * (180/Math.PI)).toFixed(1)}°<br>
+                Intake Loop: ${botState.intakeActive ? "RUNNING" : "STOPPED"}
             `;
 
             const light = document.getElementById('status-light');
